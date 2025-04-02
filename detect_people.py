@@ -20,12 +20,30 @@ import csv
 import os
 import time
 import torch
-
 import torchvision
-print(torchvision.__version__)  # Should be 0.15.1 or 0.15.2
+
+
+
+'''
+
+para ter cuda 
+
+wget https://developer.download.nvidia.cn/compute/redist/jp/v511/pytorch/torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
+pip3 install torch-2.0.0+nv23.05-cp38-cp38-linux_aarch64.whl
+pip3 install torchvision==0.15.1
+pip3 install ultralytics
+
+problema:
+/home/atlas/.local/lib/python3.8/site-packages/torchvision/io/image.py:13: UserWarning: Failed to load image Python extension: '/home/atlas/.local/lib/python3.8/site-packages/torchvision/image.so: undefined symbol: _ZN5torch3jit17parseSchemaOrNameERKSs'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+
+'''
 
 print(torch.cuda.is_available())  # Should return True
 
+device = "0" if torch.cuda.is_available() else "cpu"
+if device == "0":
+    torch.cuda.device(0)
 
 # modelo
 model = YOLO('best.pt')  
@@ -113,15 +131,19 @@ while True:
     
 
     ret, img = cap.read()
+    #print(img.is_cuda())
     if not ret:
         print("Failed to capture image")
         break
     frame_count += 1
 
-    if (frame_count % 30 ==0):
+    if (frame_count % 1 ==0):
         
         start_time = time.time()
-        results = model(img) # deteta objetos na imagem
+        print("starting inference")
+        #torch.cuda.synchronize()
+
+        results = model(img)# deteta objetos na imagem
         end_time = time.time()
 
         elapsed_time = end_time - start_time
@@ -154,7 +176,7 @@ while True:
                 label = f"{classNames[cls]} {confidence:.2f}"
                 org = (x1, y1)
                 font = cv2.FONT_HERSHEY_SIMPLEX
-                fontScale = 2
+                fontScale = 0.5
                 color = (255, 0, 0)
                 thickness = 2
 
@@ -182,7 +204,7 @@ while True:
 
     cv2.imshow('Frame', img) 
 
-    cv.waitKey(100)
+    #cv2.waitKey(3)
     if cv2.waitKey(2) == ord('q'): 
         break
 
