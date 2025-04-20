@@ -12,3 +12,6 @@ O ficheiro pipeline.py e uma versao simples que nao usa threads.
 todos os outros (detect_people, rtsp, etc sao ficheiros velhos que fui deixando)
 
 
+just for shits and giggles...
+
+mandei ao chat as 3 pipelines e pedi lhe uma "unified_pipeline" - eu acho que ta meio merda mas fica ali 
