@@ -10,12 +10,11 @@ import torchvision
 
 print(torch.cuda.is_available())  # Should return True
 
-device = "0" if torch.cuda.is_available() else "cpu"
-if device == "0":
-    torch.cuda.device(0)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # modelo
-model = YOLO('best.pt')  
+model = YOLO('best.pt').to(device)
 
 #  classes
 classNames = ["car", "person", "tree"]
@@ -39,28 +38,20 @@ def list_cameras():
 print("Available cameras:", list_cameras())
 
 
-# o segundo argumento é para mac, para windows acho que é cv2.CAP_DSHOW mas acho que não é necessário por sequer
-
-cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
 
-# isto era para o meu telemovel 
-w_tel = 360
-h_tel = 180
+gst_str = (
+    "rtspsrc location=rtsp://192.168.144.25:8554/main.264 latency=0 ! "
+    "rtph264depay ! h264parse ! omxh264dec ! "
+    "nvvidconv ! video/x-raw, format=BGRx ! videoconvert ! video/x-raw, format=BGR ! appsink"
+)
 
-# medidas do monitor do pc (isto não é preciso ser exato, mas se for muito diferente do teu pc pode dar problemas)
-'''w = 3072
-h = 1920
-cap.set(3, w)
-cap.set(4, h)'''
+cap = cv2.VideoCapture(gst_str, cv2.CAP_GSTREAMER) # para abrir uma camera ligada por ethernet
+
 
 # Set desired resolution & FPS
 w, h, fps = 640, 480, 60  # Or 1280x720 for lower resolution
 
-cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # Force H264
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
-cap.set(cv2.CAP_PROP_FPS, fps)
 
 # Check if settings applied
 actual_w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)

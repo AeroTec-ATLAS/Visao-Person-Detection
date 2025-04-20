@@ -21,7 +21,6 @@ import os
 import time
 import torch
 import torchvision
-from datetime import datetime
 
 
 
@@ -39,20 +38,9 @@ problema:
   warn(
 
 '''
-#parametros de zoom
-GOAL_W, GOAL_H = 480, 240    
-TOLERANCE       = 0.15       
-
-def zoom_logic(width, height, goal_width, goal_height, tol=TOLERANCE):
-    ratio_w = max(width / goal_width,  goal_width / width)
-    ratio_h = max(height / goal_height, goal_height / height)
-    if ratio_w <= 1 + tol and ratio_h <= 1 + tol:
-        return 0
-    if ratio_h <= ratio_w:
-        return 1 if goal_height > height else -1
-    return 1 if goal_width  > width  else -1
 
 print(torch.cuda.is_available())  # Should return True
+
 device = "0" if torch.cuda.is_available() else "cpu"
 if device == "0":
     torch.cuda.device(0)
@@ -119,19 +107,21 @@ if not cap.isOpened():
     print("Could not open webcam") 
     exit()
 
-output_dir = 'output'
+'''output_dir = 'output'
 os.makedirs(output_dir, exist_ok=True)
 
-csv_file_path = os.path.join(
-    output_dir,
-    'C:/Users/eirae/OneDrive/Ambiente de Trabalho/ATLAS/Pessoas (Mini Drone)/teste.csv'
-)
+csv_file_path = os.path.join(output_dir, 'bounding_box_centers.csv')
 sl_csv_file_path = os.path.join(output_dir, 'single_line_bounding_box_centers.csv')
 
-csv_file = open(csv_file_path, mode='w', newline='')
+# csv file 1
+csv_file = open(csv_file_path, mode = 'w', newline = '')
 csv_writer = csv.writer(csv_file)
-csv_writer.writerow(['Timestamp', 'Frame', 'Class', 'Center X', 'Center Y', 'Zoom'])  
+csv_writer.writerow(['Frame', 'Class', 'Center X', 'Center Y'])
 
+# csv file 2 (single line)
+csv_file2 = open(sl_csv_file_path, mode = 'w', newline = '')
+csv_writer2 = csv.writer(csv_file2)
+csv_writer2.writerow(['Frame', 'Class', 'Center X', 'Center Y'])'''
 
 frame_count = 0
 
@@ -146,7 +136,7 @@ while True:
         print("Failed to capture image")
         break
     frame_count += 1
-    timestamp = datetime.now().isoformat(timespec='seconds')  
+
     if (frame_count % 1 ==0):
         
         start_time = time.time()
@@ -181,8 +171,6 @@ while True:
                 cx = (x1 + x2) // 2
                 cy = (y1 + y2) // 2
                 print(f"Center of {classNames[cls]}: ({cx}, {cy})")
-                zoom_dir = zoom_logic(bw, bh, GOAL_W, GOAL_H)
-                print(f"Zoom: {zoom_dir}")
 
                 # texto e formatacao 
                 label = f"{classNames[cls]} {confidence:.2f}"
@@ -203,13 +191,12 @@ while True:
 
                 # escreve nos csvs a cada 30 frames
 
-                
-                if frame_count % 20 == 0:
-                    csv_writer.writerow([timestamp, frame_count, classNames[cls], cx, cy, zoom_dir])
-                    with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
-                        csv_writer2 = csv.writer(csv_file2)
-                        csv_writer2.writerow([timestamp, frame_count, classNames[cls], cx, cy, zoom_dir])
+                '''if frame_count % 30 == 0:
 
+                    csv_writer.writerow([frame_count, classNames[cls], cx, cy])
+                    with open(sl_csv_file_path, mode = 'w', newline = '') as csv_file2:
+                        csv_writer2 = csv.writer(csv_file2)
+                        csv_writer2.writerow([frame_count, classNames[cls], cx, cy])'''
 
 
     cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
@@ -223,4 +210,5 @@ while True:
 
 cap.release() 
 cv2.destroyAllWindows() 
-csv_file.close()
+#csv_file.close()
+
