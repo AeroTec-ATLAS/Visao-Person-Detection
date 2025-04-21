@@ -150,28 +150,42 @@ class FrameGrabber(threading.Thread):
     Background thread that continuously reads frames from a video source
     and puts them into a queue for processing.
     """
-    def __init__(self, cap_factory, frame_queue, stop_event):
+    def __init__(self, cap_factory, frame_queue, stop_event, max_retries=None, retry_delay=1):
         super().__init__(daemon=True) # daemon = True - faz com que a thread termine automaticamente quando o processo principal acabar
         self.cap_factory = cap_factory
         self.capture = self.cap_factory()
         self.frame_queue = frame_queue
         self.stop_event = stop_event
         self.dropped = 0
+        self.max_retries = max_retries  
+        self.retry_delay = retry_delay
         
     def run(self):
+        retry_count = 0
         while not self.stop_event.is_set():
+        # Ensure the capture is valid and reconnect if necessary
+            if self.capture is None or not self.capture.isOpened():
+                logging.warning("Frame grabber: capture is not opened, attempting to reconnect...")
+                self.capture = reconnect(self.cap_factory)
+                if self.capture is None:
+                    retry_count += 1
+                    if self.max_retries is not None and retry_count >= self.max_retries:
+                        logging.error("Frame grabber: maximum retries reached, exiting thread.")
+                        break
+                    logging.warning(f"Frame grabber: reconnect failed, retrying in {self.retry_delay}s...")
+                    time.sleep(self.retry_delay)
+                    continue
+                retry_count = 0  # Reset retry count after successful reconnection
+
+        # Read a frame
             ret, frame = self.capture.read()
             if not ret:
                 logging.warning("Frame grabber: read failed, reconnecting...")
                 self.capture.release()
-                self.capture = reconnect(self.cap_factory)
-                if self.capture is None:
-                    logging.error("Frame grabber: could not reconnect, exiting thread.")
-                    break
                 continue
 
             try:
-                self.frame_queue.put_nowait(frame)
+                self.frame_queue.put_nowait((time.time(), frame))
             except queue.Full:
                 self.dropped += 1
                 if self.dropped % 100 == 0:
@@ -250,23 +264,12 @@ def main():
 
     while not stop_event.is_set():
         try:
-            frame = frame_queue.get(timeout=1)  # Grab the next frame from the queue
-
-            # Record the timestamp of the frame
-            frame_timestamp = time.time()
-        
-            # Now discard any remaining frames in the queue that are too old
-            while not frame_queue.empty():
-                next_frame = frame_queue.get_nowait()  # Get the next frame without blocking
-                next_frame_timestamp = time.time()  # Get the current time when grabbing the next frame
+            frame_timestamp, frame = frame_queue.get(timeout=1)  # Grab the next frame from the queue
 
             # If the frame is older than the threshold, discard it
-            if next_frame_timestamp - frame_timestamp > FRAME_AGE_THRESHOLD:
+            if time.time() - frame_timestamp > FRAME_AGE_THRESHOLD:
                 logging.info(f"Discarding frame older than {FRAME_AGE_THRESHOLD} seconds.")
                 continue  # Skip processing of this frame
-
-            # Otherwise, put it back into the queue for further processing
-            frame_queue.put(next_frame)
 
         except queue.Empty:
             if not grabber.is_alive():
