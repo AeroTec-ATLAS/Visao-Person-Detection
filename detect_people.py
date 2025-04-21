@@ -80,24 +80,11 @@ def list_cameras():
 print("Available cameras:", list_cameras())
 
 
-# o segundo argumento é para mac, para windows acho que é cv2.CAP_DSHOW mas acho que não é necessário por sequer
-
-cap = cv2.VideoCapture(0,cv2.CAP_DSHOW)
-
-
-# isto era para o meu telemovel 
-w_tel = 360
-h_tel = 180
-
-# medidas do monitor do pc (isto não é preciso ser exato, mas se for muito diferente do teu pc pode dar problemas)
-'''w = 3072
-h = 1920
-cap.set(3, w)
-cap.set(4, h)'''
+#Path video/stream
+cap = cv2.VideoCapture(0)
 
 # Set desired resolution & FPS
 w, h, fps = 640, 480, 60  # Or 1280x720 for lower resolution
-
 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))  # Force H264
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, w)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, h)
@@ -120,12 +107,16 @@ if not cap.isOpened():
 output_dir = 'output'
 os.makedirs(output_dir, exist_ok=True)
 
+#Path csv x linhas
 csv_file_path = os.path.join(
     output_dir,
     'dados.csv'
 )
-sl_csv_file_path = os.path.join(output_dir, 'single_line_bounding_box_centers.csv')
-# reabrir csv
+
+#Path csv 1 linha
+sl_csv_file_path = os.path.join(output_dir, '1_linha.csv')
+
+
 def open_main_csv():
     f = open(csv_file_path, mode='w', newline='')
     w = csv.writer(f)
@@ -146,7 +137,6 @@ while True:
         print("Failed to capture image")
         break
     frame_count += 1
-
     timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
     img_h, img_w = img.shape[:2]
   
@@ -194,14 +184,14 @@ while True:
                         [timestamp, frame_count, rel_cx, rel_cy, zoom_dir]
                     )
             detection_written = True
-
+    #Caso 0 deteções
     if not detection_written and frame_count % 20 == 0:
         zero_row = [timestamp, 0, 0, 0, 0]
         csv_writer.writerow(zero_row)
         rows_written += 1
         with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
             csv.writer(csv_file2).writerow(zero_row)
-
+   #a cada x linhas reescrever
     if rows_written >= 100:
         csv_file.close()           
         csv_file, csv_writer = open_main_csv()  
