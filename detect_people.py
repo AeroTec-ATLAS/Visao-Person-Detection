@@ -58,14 +58,12 @@ if device == "0":
     torch.cuda.device(0)
 
 # modelo
-model = YOLO('best.pt')  
+model = YOLO("best.pt")  
 
 #  classes
 classNames = ["car", "person", "tree"]
 
 # start webcam
-
-
 def list_cameras():
     index = 0
     arr = []
@@ -84,7 +82,7 @@ print("Available cameras:", list_cameras())
 
 # o segundo argumento é para mac, para windows acho que é cv2.CAP_DSHOW mas acho que não é necessário por sequer
 
-cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+cap = cv2.VideoCapture(0,cv2.CAP_DSHOW)
 
 
 # isto era para o meu telemovel 
@@ -124,92 +122,90 @@ os.makedirs(output_dir, exist_ok=True)
 
 csv_file_path = os.path.join(
     output_dir,
-    'C:/Users/eirae/OneDrive/Ambiente de Trabalho/ATLAS/Pessoas (Mini Drone)/teste.csv'
+    'dados.csv'
 )
 sl_csv_file_path = os.path.join(output_dir, 'single_line_bounding_box_centers.csv')
+# reabrir csv
+def open_main_csv():
+    f = open(csv_file_path, mode='w', newline='')
+    w = csv.writer(f)
+    w.writerow(['Timestamp', 'Frame', 'Class', 'Center X', 'Center Y', 'Zoom'])
+    return f, w
 
-csv_file = open(csv_file_path, mode='w', newline='')
-csv_writer = csv.writer(csv_file)
-csv_writer.writerow(['Timestamp', 'Frame', 'Class', 'Center X', 'Center Y', 'Zoom'])  
+csv_file, csv_writer = open_main_csv()
+rows_written = 0            # conta linhas
 
 
 frame_count = 0
-
 detected_objects = []
 
 while True:
-    
-
     ret, img = cap.read()
     #print(img.is_cuda())
     if not ret:
         print("Failed to capture image")
         break
     frame_count += 1
-    timestamp = datetime.now().isoformat(timespec='seconds')  
-    if (frame_count % 1 ==0):
-        
-        start_time = time.time()
-        print("starting inference")
-        #torch.cuda.synchronize()
 
-        results = model(img)# deteta objetos na imagem
-        end_time = time.time()
+    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+    img_h, img_w = img.shape[:2]
+  
+    start_time = time.time()
+    results = model(img)
+    print(f"Elapsed time of inference: {time.time() - start_time: .6f} s")
 
-        elapsed_time = end_time - start_time
-        print(f"Elapsed time of inference: {elapsed_time: .6f} seconds")
-    
-        
-        
-        for r in results:
-            boxes = r.boxes 
+    detection_written = False
 
-            for box in boxes:
-                # bounding box
-                x1, y1, x2, y2 = box.xyxy[0]
-                x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2) 
+    for r in results:
+        boxes = r.boxes
+        for box in boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            bw, bh = x2 - x1, y2 - y1
 
-                # confidence
-                confidence = math.ceil((box.conf[0]*100))/100
-                print("Confidence --->", confidence)
+            confidence = math.ceil(box.conf[0] * 100) / 100
+            cls = int(box.cls[0])
 
-                # nome da classe
-                cls = int(box.cls[0])
-                print("Class name -->", classNames[cls])
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2  # centro absoluto
+            rel_cx = cx - img_w // 2                 # origem no centro da imagem
+            rel_cy = (img_h // 2) - cy
 
-                # centro da bounding box
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                print(f"Center of {classNames[cls]}: ({cx}, {cy})")
-                zoom_dir = zoom_logic(bw, bh, GOAL_W, GOAL_H)
-                print(f"Zoom: {zoom_dir}")
+            zoom_dir = zoom_logic(bw, bh, GOAL_W, GOAL_H)
 
-                # texto e formatacao 
-                label = f"{classNames[cls]} {confidence:.2f}"
-                org = (x1, y1)
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                fontScale = 0.5
-                color = (255, 0, 0)
-                thickness = 2
+            label = f"{classNames[cls]} {confidence:.2f}"
+            if confidence > 0.5:
+                cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
+                cv2.putText(img, label, (x1, y1),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+                cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1)
 
-                if confidence > 0.5:
-                    cv2.rectangle(img, (x1, y1), (x2, y2), (255, 0, 255), 3) # bounding box
-                    cv2.putText(img, label, org, font, fontScale, color, thickness) # label da confidence 
-                    cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1) # centro da bounding box
-
-                
-
-                detected_objects.append([frame_count, classNames[cls], cx, cy])
+            detected_objects.append(
+                [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+            )
 
                 # escreve nos csvs a cada 30 frames
+            if frame_count % 30 == 0:
+                csv_writer.writerow(
+                    [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+                )
+                rows_written += 1
+                # CSV de uma só linha:
+                with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
+                    csv.writer(csv_file2).writerow(
+                        [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+                    )
+            detection_written = True
 
-                
-                if frame_count % 20 == 0:
-                    csv_writer.writerow([timestamp, frame_count, classNames[cls], cx, cy, zoom_dir])
-                    with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
-                        csv_writer2 = csv.writer(csv_file2)
-                        csv_writer2.writerow([timestamp, frame_count, classNames[cls], cx, cy, zoom_dir])
+    if not detection_written and frame_count % 20 == 0:
+        zero_row = [timestamp, 0, 0, 0, 0, 0]
+        csv_writer.writerow(zero_row)
+        rows_written += 1
+        with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
+            csv.writer(csv_file2).writerow(zero_row)
 
+    if rows_written >= 100:
+        csv_file.close()           
+        csv_file, csv_writer = open_main_csv()  
+        rows_written = 0           
 
 
     cv2.namedWindow("Frame", cv2.WND_PROP_FULLSCREEN)
