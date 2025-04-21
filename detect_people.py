@@ -129,7 +129,7 @@ sl_csv_file_path = os.path.join(output_dir, 'single_line_bounding_box_centers.cs
 def open_main_csv():
     f = open(csv_file_path, mode='w', newline='')
     w = csv.writer(f)
-    w.writerow(['Timestamp', 'Frame', 'Class', 'Center X', 'Center Y', 'Zoom'])
+    w.writerow(['Timestamp', 'Frame', 'Center X', 'Center Y', 'Zoom'])
     return f, w
 
 csv_file, csv_writer = open_main_csv()
@@ -179,24 +179,24 @@ while True:
                 cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1)
 
             detected_objects.append(
-                [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+                [timestamp, frame_count, rel_cx, rel_cy, zoom_dir]
             )
 
                 # escreve nos csvs a cada 30 frames
             if frame_count % 30 == 0:
                 csv_writer.writerow(
-                    [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+                    [timestamp, frame_count, rel_cx, rel_cy, zoom_dir]
                 )
                 rows_written += 1
                 # CSV de uma só linha:
                 with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
                     csv.writer(csv_file2).writerow(
-                        [timestamp, frame_count, classNames[cls], rel_cx, rel_cy, zoom_dir]
+                        [timestamp, frame_count, rel_cx, rel_cy, zoom_dir]
                     )
             detection_written = True
 
     if not detection_written and frame_count % 20 == 0:
-        zero_row = [timestamp, 0, 0, 0, 0, 0]
+        zero_row = [timestamp, 0, 0, 0, 0]
         csv_writer.writerow(zero_row)
         rows_written += 1
         with open(sl_csv_file_path, mode='w', newline='') as csv_file2:
