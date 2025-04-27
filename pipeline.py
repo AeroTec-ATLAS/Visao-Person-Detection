@@ -7,8 +7,8 @@ import os
 import csv
 
 # IPs, ports, stream e suas configuracoes
-camera_ipv4 = "192.168.1.10"  # TODO: meter IP real
-ground_station_ip = "192.168.1.100"  # TODO: meter para IP real
+camera_ipv4 = "194.210.57.160"  # TODO: meter IP real
+ground_station_ip = "194.210.57.160"  # TODO: meter para IP real
 rtsp_default_port = 8554
 udp_default_port = 5600  # QGroundControl espera video nesta port por default
 main_stream_name = "main.264"
@@ -74,6 +74,27 @@ def build_gst_pipeline_input(ip, port, stream, latency):
     "appsink"
     )
 
+def build_gst_pipeline_input2(ip, port, stream, latency):
+    return (
+        # Obter a stream UDP da câmara pela rede (ethernet)
+        f"-v udpsrc port={port} caps=application/x-rtp, media=(string)video, payload=(int)96, encoding-name=(string)H264 ! "
+
+        # Desempacotar (extrair o conteúdo) do vídeo H.264 dos pacotes RTP
+        "rtph264depay ! "
+
+        # H264 parse para garantir que está pronto para descodificação
+        "h264parse ! "
+
+        # Decodificação de vídeo com aceleração de hardware ou software
+        "avdec_h264 ! "
+
+        # Converte o formato para o OpenCV
+        "videoconvert ! "
+
+        # A OpenCV vai receber os frames aqui, com sync desativado
+        "appsink sync=false"
+    )
+
 
 def build_gst_pipeline_output(ip, width, height, fps, bitrate):
     return (
@@ -95,7 +116,7 @@ def build_gst_pipeline_output(ip, width, height, fps, bitrate):
     # SPS (Sequence Parameter Set) - resolução da imagem, o formato da codificação, a taxa de compressão e outros parâmetros de nível superior (resolucao, bitrate, fps)
     # PPS (Picture Parameter Set) -  configuração de cada frame  dentro do vídeo, como a quantização, o tipo de bloco usado e a estrutura de codificação
         # Quantização: Diminui a precisão dos dados para reduzir o tamanho do arquivo; Tipo de bloco: Define como a imagem é dividida para compressão; Estrutura de codificação: Organiza a sequência de frames para otimizar a compressão e a decodificação.
-    f"nvv4l2h264enc bitrate={bitrate} insert-sps-pps=true !"
+    f"nvv4l2h264enc bitrate={bitrate/1000} insert-sps-pps=true !"
 
     # "rtph264pay" encapsula o fluxo de vídeo H.264 em pacotes RTP 
     # com config_interval=1, as configuracoes SPS e PPS sao enviadas a cada segundo. Aumentar pode tornar a transmissao mais rapida, mas pode perder-se sincronizacao
@@ -113,6 +134,7 @@ def build_gst_pipeline_output(ip, width, height, fps, bitrate):
 
 def open_camera(pipeline_input):
     cap = cv2.VideoCapture(pipeline_input, cv2.CAP_GSTREAMER)
+    print(f"Pipeline: {pipeline_input}")
     if not cap.isOpened():
         raise RuntimeError("Falha ao abrir a stream da câmera.")
     return cap
@@ -175,9 +197,13 @@ def process_frame(model, frame, frame_count, csv_writer, zoom_dir):
 
 
 def main():
-    model = load_model()
+    
+    print(torch.cuda.is_available())  # Should return True
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # modelo
+    model = YOLO('best.pt').to(device)
 
-    gst_in = build_gst_pipeline_input(camera_ipv4, rtsp_default_port, main_stream_name, latency)
+    gst_in = build_gst_pipeline_input2(camera_ipv4, rtsp_default_port, main_stream_name, latency)
     cap = open_camera(gst_in)
 
     # Ler primeiro frame para obter dimensões
