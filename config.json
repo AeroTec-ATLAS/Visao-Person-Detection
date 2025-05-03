@@ -1,12 +1,12 @@
 {
-    "camera_ipv4": "192.168.1.10",
-    "ground_station_ip": "192.168.1.100",
+    "camera_ipv4": "172.20.10.2",
+    "ground_station_ip": "172.20.10.2",
     "rtsp_port": 8554,
     "udp_port": 5600,
     "stream_name": "main.264",
     "latency": 100,
     "fps": 30,
-    "bitrate": 4000000,
+    "bitrate": 800,
     "model_path": "best.pt",
     "class_names": ["car", "person", "tree"],
     "conf_thresh": 0.5

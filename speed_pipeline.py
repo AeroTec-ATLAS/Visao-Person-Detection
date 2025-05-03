@@ -140,6 +140,67 @@ def build_output_pipeline(ip, port, width, height, fps, bitrate):
     f"udpsink host={ip} port={port}"
     )
 
+def build_input_pipeline2(ip, port, stream, latency):
+    return (
+        # Obter a stream UDP da câmara pela rede (ethernet)
+        f'udpsrc port={port} caps="application/x-rtp, media=(string)video, payload=(int)96, encoding-name=(string)H264" ! '
+
+        # Desempacotar (extrair o conteúdo) do vídeo H.264 dos pacotes RTP
+        "rtph264depay ! "
+
+        # H264 parse para garantir que está pronto para descodificação
+        "h264parse ! "
+
+        # Decodificação de vídeo com aceleração de hardware ou software
+        "avdec_h264 ! "  # Substituído por 'avdec_h264' para decodificação correta
+
+        # Converte o formato para o OpenCV
+        "videoconvert ! "
+
+        # A OpenCV vai receber os frames aqui
+        "appsink sync=false"
+    )
+
+def build_output_pipeline2(ip, port, width, height, fps, bitrate):
+    return (
+        # "appsrc" indica que vamos usar dados provenientes de uma fonte personalizada (neste caso, o OpenCV ou o código que gera o vídeo)
+    f"appsrc ! "
+
+    # "videoconvert" converte o formato do vídeo para algo que o resto da pipeline aceite
+    "videoconvert ! "
+
+    # "nvvidconv" é uma conversão otimizada para GPUs da NVIDIA
+    # "nvvidconv ! "
+
+    # Adiciona o formato desejado: NVMM memory (nvidia memory management- forca uso da GPU), resolução e framerate
+    f"video/x-raw, format=NV12, width={width}, height={height}, framerate={fps}/1 ! "
+
+    # "nvv4l2h264enc" é o codificador de vídeo H.264 da NVIDIA, que usa a aceleração por hardware (ou seja a GPU)
+    # A "bitrate=4000000" define a taxa de bits para a compressão do vídeo (4 Mbps neste caso)
+    # insert-sps-pps = true garante que as definicoes SPS e PPS sao enviadas (necessarias para descodificar o video H.264)
+    # SPS (Sequence Parameter Set) - resolução da imagem, o formato da codificação, a taxa de compressão e outros parâmetros de nível superior (resolucao, bitrate, fps)
+    # PPS (Picture Parameter Set) -  configuração de cada frame  dentro do vídeo, como a quantização, o tipo de bloco usado e a estrutura de codificação
+        # Quantização: Diminui a precisão dos dados para reduzir o tamanho do arquivo; Tipo de bloco: Define como a imagem é dividida para compressão; Estrutura de codificação: Organiza a sequência de frames para otimizar a compressão e a decodificação.
+    # f"nvv4l2h264enc bitrate={bitrate} insert-sps-pps=true !"
+    f"x264enc tune=zerolatency bitrate={bitrate}  !"
+
+    # "rtph264pay" encapsula o fluxo de vídeo H.264 em pacotes RTP 
+    # com config_interval=1, as configuracoes SPS e PPS sao enviadas a cada segundo. Aumentar pode tornar a transmissao mais rapida, mas pode perder-se sincronizacao
+    # "pt=96" define o payload type (valor numérico usado para identificar o tipo de video que está a ser transportado nos pacotes RTP); 96 esta reservado para h.264
+    # poderia acrescentar-se um MTU (Maximum Transmission Unit) = 1400, por exemplo; assim manda-se pacotes pequenos (1400 bytes), o que evita fragmentacao;
+        # em principio o rtph264pay ja limita o tamanho dos pacotes ao limite da rede; se houver fragmentacao, testamos MTUs
+    
+    "h264parse ! "
+
+    "rtph264pay config-interval=1 pt=96 ! "
+
+    # "udpsink" envia os pacotes RTP para a ground station via UDP
+    # "host={receiver_ip}" define o endereço IP da ground station
+    # "port=5000" define a porta a usar para enviar os pacotes
+    f"udpsink host={ip} port={port} sync=false"
+    )
+
+
 
 # =============================================================================
 # Frame Grabber Thread
@@ -227,7 +288,7 @@ def main():
     class_names = cfg.get('class_names', ['car','person','tree'])
 
     # GStreamer setup
-    inp_pipe = build_input_pipeline(cam_ip, rtsp_port, stream_name, latency)
+    inp_pipe = build_input_pipeline2(cam_ip, rtsp_port, stream_name, latency)
     cap_factory = lambda: cv2.VideoCapture(inp_pipe, cv2.CAP_GSTREAMER)
 
     # Initial capture to get frame size
@@ -242,7 +303,7 @@ def main():
     # OpenCV returns (height, width), but GStreamer expects (width, height)
     height, width = frame.shape[:2]
 
-    out_pipe = build_output_pipeline(gs_ip, udp_port, width, height, fps, bitrate)
+    out_pipe = build_output_pipeline2(gs_ip, udp_port, width, height, fps, bitrate)
     out = cv2.VideoWriter(out_pipe, cv2.CAP_GSTREAMER, fps, (width, height))
     if not out.isOpened():
         raise RuntimeError('Não foi possível abrir VideoWriter')
