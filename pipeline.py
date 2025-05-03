@@ -7,8 +7,9 @@ import os
 import csv
 
 # IPs, ports, stream e suas configuracoes
-camera_ipv4 = "194.210.57.160"  # TODO: meter IP real
-ground_station_ip = "194.210.57.160"  # TODO: meter para IP real
+ip_tmp = "172.20.10.2"
+camera_ipv4 = ip_tmp  # TODO: meter IP real
+ground_station_ip = ip_tmp  # TODO: meter para IP real
 rtsp_default_port = 8554
 udp_default_port = 5600  # QGroundControl espera video nesta port por default
 main_stream_name = "main.264"
@@ -77,7 +78,7 @@ def build_gst_pipeline_input(ip, port, stream, latency):
 def build_gst_pipeline_input2(ip, port, stream, latency):
     return (
         # Obter a stream UDP da câmara pela rede (ethernet)
-        f"-v udpsrc port={port} caps=application/x-rtp, media=(string)video, payload=(int)96, encoding-name=(string)H264 ! "
+        f'udpsrc port={port} caps="application/x-rtp, media=(string)video, payload=(int)96, encoding-name=(string)H264" ! '
 
         # Desempacotar (extrair o conteúdo) do vídeo H.264 dos pacotes RTP
         "rtph264depay ! "
@@ -86,12 +87,12 @@ def build_gst_pipeline_input2(ip, port, stream, latency):
         "h264parse ! "
 
         # Decodificação de vídeo com aceleração de hardware ou software
-        "avdec_h264 ! "
+        "avdec_h264 ! "  # Substituído por 'avdec_h264' para decodificação correta
 
         # Converte o formato para o OpenCV
         "videoconvert ! "
 
-        # A OpenCV vai receber os frames aqui, com sync desativado
+        # A OpenCV vai receber os frames aqui
         "appsink sync=false"
     )
 
@@ -108,7 +109,7 @@ def build_gst_pipeline_output(ip, width, height, fps, bitrate):
     "nvvidconv ! "
 
     # Adiciona o formato desejado: NVMM memory (nvidia memory management- forca uso da GPU), resolução e framerate
-    f"video/x-raw(memory:NVMM), width=640, height=480, framerate={fps}/1 ! "
+    f"video/x-raw(memory:NVMM), width={width}, height={height}, framerate={fps}/1 ! "
 
     # "nvv4l2h264enc" é o codificador de vídeo H.264 da NVIDIA, que usa a aceleração por hardware (ou seja a GPU)
     # A "bitrate=4000000" define a taxa de bits para a compressão do vídeo (4 Mbps neste caso)
@@ -116,7 +117,7 @@ def build_gst_pipeline_output(ip, width, height, fps, bitrate):
     # SPS (Sequence Parameter Set) - resolução da imagem, o formato da codificação, a taxa de compressão e outros parâmetros de nível superior (resolucao, bitrate, fps)
     # PPS (Picture Parameter Set) -  configuração de cada frame  dentro do vídeo, como a quantização, o tipo de bloco usado e a estrutura de codificação
         # Quantização: Diminui a precisão dos dados para reduzir o tamanho do arquivo; Tipo de bloco: Define como a imagem é dividida para compressão; Estrutura de codificação: Organiza a sequência de frames para otimizar a compressão e a decodificação.
-    f"nvv4l2h264enc bitrate={bitrate/1000} insert-sps-pps=true !"
+    f"nvv4l2h264enc bitrate={bitrate} insert-sps-pps=true !"
 
     # "rtph264pay" encapsula o fluxo de vídeo H.264 em pacotes RTP 
     # com config_interval=1, as configuracoes SPS e PPS sao enviadas a cada segundo. Aumentar pode tornar a transmissao mais rapida, mas pode perder-se sincronizacao
@@ -128,22 +129,73 @@ def build_gst_pipeline_output(ip, width, height, fps, bitrate):
     # "udpsink" envia os pacotes RTP para a ground station via UDP
     # "host={receiver_ip}" define o endereço IP da ground station
     # "port=5000" define a porta a usar para enviar os pacotes
-    f"udpsink host={ground_station_ip} port={udp_default_port}"
+    f"udpsink host={ip_tmp} port={udp_default_port} sync=false"
+    )
+
+def build_gst_pipeline_output2(ip, width, height, fps, bitrate):
+    return (
+        # "appsrc" indica que vamos usar dados provenientes de uma fonte personalizada (neste caso, o OpenCV ou o código que gera o vídeo)
+    f"appsrc ! "
+
+    # "videoconvert" converte o formato do vídeo para algo que o resto da pipeline aceite
+    "videoconvert ! "
+
+    # "nvvidconv" é uma conversão otimizada para GPUs da NVIDIA
+    # "nvvidconv ! "
+
+    # Adiciona o formato desejado: NVMM memory (nvidia memory management- forca uso da GPU), resolução e framerate
+    # f"video/x-raw(memory:NVMM), width={width}, height={height}, framerate={fps}/1 ! "
+
+    # "nvv4l2h264enc" é o codificador de vídeo H.264 da NVIDIA, que usa a aceleração por hardware (ou seja a GPU)
+    # A "bitrate=4000000" define a taxa de bits para a compressão do vídeo (4 Mbps neste caso)
+    # insert-sps-pps = true garante que as definicoes SPS e PPS sao enviadas (necessarias para descodificar o video H.264)
+    # SPS (Sequence Parameter Set) - resolução da imagem, o formato da codificação, a taxa de compressão e outros parâmetros de nível superior (resolucao, bitrate, fps)
+    # PPS (Picture Parameter Set) -  configuração de cada frame  dentro do vídeo, como a quantização, o tipo de bloco usado e a estrutura de codificação
+        # Quantização: Diminui a precisão dos dados para reduzir o tamanho do arquivo; Tipo de bloco: Define como a imagem é dividida para compressão; Estrutura de codificação: Organiza a sequência de frames para otimizar a compressão e a decodificação.
+    # f"nvv4l2h264enc bitrate={bitrate} insert-sps-pps=true !"
+    f"x264enc bitrate={bitrate//1000}  !"
+
+    # "rtph264pay" encapsula o fluxo de vídeo H.264 em pacotes RTP 
+    # com config_interval=1, as configuracoes SPS e PPS sao enviadas a cada segundo. Aumentar pode tornar a transmissao mais rapida, mas pode perder-se sincronizacao
+    # "pt=96" define o payload type (valor numérico usado para identificar o tipo de video que está a ser transportado nos pacotes RTP); 96 esta reservado para h.264
+    # poderia acrescentar-se um MTU (Maximum Transmission Unit) = 1400, por exemplo; assim manda-se pacotes pequenos (1400 bytes), o que evita fragmentacao;
+        # em principio o rtph264pay ja limita o tamanho dos pacotes ao limite da rede; se houver fragmentacao, testamos MTUs
+    "rtph264pay config-interval=1 pt=96 ! "
+
+    # "udpsink" envia os pacotes RTP para a ground station via UDP
+    # "host={receiver_ip}" define o endereço IP da ground station
+    # "port=5000" define a porta a usar para enviar os pacotes
+    f"udpsink host={ip_tmp} port={udp_default_port} sync=false"
     )
 
 
+
 def open_camera(pipeline_input):
+    print(f"Attempting to open camera with pipeline: {pipeline_input}")
     cap = cv2.VideoCapture(pipeline_input, cv2.CAP_GSTREAMER)
-    print(f"Pipeline: {pipeline_input}")
     if not cap.isOpened():
+        print("Failed to open camera stream. Check the pipeline and camera accessibility.")
         raise RuntimeError("Falha ao abrir a stream da câmera.")
+    else:
+        print("Camera stream opened successfully.")
+
+    # Test reading a frame to ensure the stream is functional
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        print("Failed to read a frame from the camera stream. Ensure the camera is streaming and the pipeline is correct.")
+        raise RuntimeError("Falha ao capturar frame da câmera.")
+    else:
+        print("Successfully read a frame from the camera stream.")
+
     return cap
 
 
 def open_output(ip, width, height, fps, bitrate):
-    pipeline_output = build_gst_pipeline_output(ip, width, height, fps, bitrate)
+    pipeline_output = build_gst_pipeline_output2(ip, width, height, fps, bitrate)
+    print(f"GStreamer pipeline for output: {pipeline_output}", flush=True)  # Debugging info
     out = cv2.VideoWriter(pipeline_output, cv2.CAP_GSTREAMER, fps, (width, height))
     if not out.isOpened():
+        print("Failed to open GStreamer VideoWriter. Check the pipeline configuration and GStreamer setup.")
         raise RuntimeError("Falha ao abrir GStreamer VideoWriter para envio.")
     return out
 
@@ -169,8 +221,7 @@ def process_frame(model, frame, frame_count, csv_writer, zoom_dir):
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
                 # Zoom
-                zoom_dir = zoom_logic(bw, bh, GOAL_W, GOAL_H)
-                print(f"Zoom: {zoom_dir}")
+                
 
                 # texto e formatacao
                 label = f"{classNames[cls_id]} {conf:.2f}"
@@ -201,6 +252,7 @@ def main():
     print(torch.cuda.is_available())  # Should return True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # modelo
+    print(device) # should return cuda
     model = YOLO('best.pt').to(device)
 
     gst_in = build_gst_pipeline_input2(camera_ipv4, rtsp_default_port, main_stream_name, latency)
@@ -228,15 +280,21 @@ def main():
     frame_count = 0
     
     while True:
+        print("entrou no while True")
         ret, frame = cap.read()
         if not ret:
             print("Falha ao capturar imagem")
             break
-
-        frame_count += 1
         
+        print("Vamos aumentar frame count")
+        frame_count += 1
+        zoom_dir = zoom_logic(w, h, GOAL_W, GOAL_H)
+        print(f"Zoom: {zoom_dir}")
+        print("Zoom feito, vamos processar frame")
         annotated_frame = process_frame(model, frame, frame_count, csv_writer, zoom_dir)
+        print("Anotado. Vamos escrever para a pipeline")
         out.write(annotated_frame)
+        print("Escrito na pipe")
 
     cap.release()
     out.release()
