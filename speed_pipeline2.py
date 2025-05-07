@@ -25,17 +25,14 @@ logging.basicConfig(
 # Signal Handling
 # =============================================================================
 stop_event = threading.Event()
-
 def handle_sigint(signum, frame):
     logging.info("\nCtrl+C recebido, a parar…")
     stop_event.set()
-
 signal.signal(signal.SIGINT, handle_sigint)
 
 # =============================================================================
 # Utility Functions
 # =============================================================================
-
 def load_config(path):
     with open(path, 'r') as f:
         return json.load(f)
@@ -52,10 +49,8 @@ def reconnect(cap_factory, max_backoff=32):
         backoff = min(backoff * 2, max_backoff)
     return None
 
-# Zoom logic
 GOAL_W, GOAL_H = 480, 240
 TOLERANCE = 0.15
-
 def zoom_logic(box_w, box_h, w, h):
     ratio_w = max(box_w / w, w / box_w)
     ratio_h = max(box_h / h, h / box_h)
@@ -68,7 +63,6 @@ def zoom_logic(box_w, box_h, w, h):
 # =============================================================================
 # GStreamer Pipelines
 # =============================================================================
-
 def build_input_pipeline(ip, port, stream, latency):
     return (
         f"rtspsrc location=rtsp://root:atlas@{ip}/{stream} latency={latency} ! "
@@ -77,7 +71,7 @@ def build_input_pipeline(ip, port, stream, latency):
     )
 
 def build_output_pipeline(ip, port, w, h, fps, bitrate):
-    # Agora com f-strings corretos e definições de caps
+    # Todo o pipeline é agora um f-string, para inserir corretamente bitrate, w, h e fps
     return (
         f"appsrc ! video/x-raw,format=BGR,width={w},height={h},framerate={fps}/1 ! "
         "videoconvert ! "
@@ -124,11 +118,7 @@ class FrameGrabber(threading.Thread):
                 if self.dropped % 100 == 0:
                     logging.warning("Dropped %d frames", self.dropped)
 
-# =============================================================================
-# CSV Helper
-# =============================================================================
 def write_single_line_csv(path, header, row):
-    """Escreve um CSV sobrescrevendo com um header e uma única linha de dados."""
     with open(path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(header)
@@ -147,7 +137,6 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Config params
     cam_ip     = cfg['camera_ipv4']
     gs_ip      = cfg['ground_station_ip']
     rtsp_port  = cfg.get('rtsp_port', 8554)
@@ -161,15 +150,12 @@ def main():
     detect_int = cfg.get('detection_interval', 20)
     max_det    = cfg.get('max_det', None)
 
-    # Só detectar pessoas (classe 0)
-    sel_cls = [0]
+    sel_cls = [0]  # só “person”
 
-    # Otimizações de inferência
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.backends.cudnn.benchmark = True
     model = YOLO(cfg.get('model_path', 'yolo11n.pt')).to(device).half().eval()
 
-    # GStreamer setup
     inp = build_input_pipeline(cam_ip, rtsp_port, stream, latency)
     cap_factory = lambda: cv2.VideoCapture(inp, cv2.CAP_GSTREAMER)
     cap0 = cap_factory()
@@ -181,19 +167,17 @@ def main():
     h, w = frame.shape[:2]
 
     out_pipe = build_output_pipeline(gs_ip, udp_port, w, h, fps, bitrate)
-    # Note que agora passamos quatro argumentos: API (CAP_GSTREAMER), fourcc, fps e tamanho
+    # com GStreamer, passamos apenas API (CAP_GSTREAMER), fourcc=0, fps, tamanho e flag de cor
     out = cv2.VideoWriter(out_pipe, cv2.CAP_GSTREAMER, 0, fps, (w, h), True)
     if not out.isOpened():
         raise RuntimeError('Cannot open Writer')
 
-    # CSV setup
     out_dir  = cfg.get('output_dir', 'output')
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, '1linha.csv')
     header   = ['Timestamp', 'Frame', 'CenterX', 'CenterY', 'Zoom']
 
-    # Start grabber
-    q       = queue.Queue(maxsize=5)
+    q = queue.Queue(maxsize=5)
     grabber = FrameGrabber(cap_factory, q, stop_event)
     grabber.start()
 
@@ -210,54 +194,35 @@ def main():
             continue
 
         count += 1
-
-        # Inference sem gradientes
         with torch.no_grad():
-            res = model(
-                frame,
-                conf=cfg.get('conf_thresh', 0.5),
-                classes=sel_cls,
-                max_det=max_det
-            )
+            res = model(frame, conf=cfg.get('conf_thresh', 0.5), classes=sel_cls, max_det=max_det)
 
-        # Escolhe a melhor deteção
         best, best_conf = None, 0.0
         for box in res[0].boxes:
             c = float(box.conf[0])
             if c > best_conf:
                 best_conf, best = c, box
 
-        # Overlay
         zm = 0
         if best:
-            x1, y1, x2, y2 = map(int, best.xyxy[0])
-            bw, bh        = x2 - x1, y2 - y1
-            cx, cy        = x1 + bw // 2, y1 + bh // 2
-            zm            = zoom_logic(bw, bh, GOAL_W, GOAL_H)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            cv2.putText(
-                frame,
-                f"Conf:{best_conf:.2f} Zoom:{zm}",
-                (x1, y1 - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2
-            )
+            x1,y1,x2,y2 = map(int, best.xyxy[0])
+            bw, bh     = x2-x1, y2-y1
+            cx, cy     = x1 + bw//2, y1 + bh//2
+            zm         = zoom_logic(bw, bh, GOAL_W, GOAL_H)
+            cv2.rectangle(frame, (x1,y1),(x2,y2),(0,255,0),2)
+            cv2.putText(frame, f"Conf:{best_conf:.2f} Zoom:{zm}",
+                        (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255),2)
 
-        # Stream
         out.write(frame)
 
-        # Liberta cache da GPU periodicamente
-        if torch.cuda.is_available() and count % (detect_int * 10) == 0:
+        if torch.cuda.is_available() and count % (detect_int*10) == 0:
             torch.cuda.empty_cache()
 
-        # CSV overwrite
         if count % detect_int == 0:
             ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
             if best:
-                relx = cx - w // 2
-                rely = (h // 2) - cy
+                relx = cx - w//2
+                rely = (h//2) - cy
                 row  = [ts, count, relx, rely, zm]
             else:
                 row = [ts, 0, 0, 0, 0]
@@ -269,3 +234,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
