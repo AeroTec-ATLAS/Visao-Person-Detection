@@ -126,6 +126,7 @@ class FrameGrabber(threading.Thread):
 # =============================================================================
 # CSV Helper
 # =============================================================================
+
 def write_single_line_csv(path, header, row):
     """Escreve um CSV sobrescrevendo com um header e uma única linha de dados."""
     with open(path, 'w', newline='') as f:
@@ -158,13 +159,14 @@ def main():
     global TOLERANCE
     TOLERANCE = cfg.get('tolerance', TOLERANCE)
     detect_int = cfg.get('detection_interval', 20)
-    sel_cls = cfg.get('selected_classes', [])
-    max_det = cfg.get('max_det', None)
+
+    # Forçar detecção apenas de pessoas e uma única caixa
+    sel_cls = [0]   # Índice da classe 'person' no modelo COCO
+    max_det = 1     # Apenas uma deteção por inferência
 
     # YOLOv11 model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = YOLO(cfg.get('model_path', 'yolo11n.pt')).to(device)
-    names = cfg.get('class_names', ['car','person','tree'])
 
     # GStreamer setup
     inp = build_input_pipeline(cam_ip, rtsp_port, stream, latency)
@@ -181,7 +183,7 @@ def main():
     # Single-line CSV setup
     out_dir = cfg.get('output_dir','output')
     os.makedirs(out_dir, exist_ok=True)
-    csv_path = os.path.join(out_dir, '/home/atlas/atlas/visao/24-25/Visao-Person-Detection/1linha.csv')
+    csv_path = os.path.join(out_dir, '1linha.csv')
     header = ['Timestamp','Frame','CenterX','CenterY','Zoom']
 
     # Start grabber
@@ -201,42 +203,37 @@ def main():
             continue
 
         count += 1
-        # detect
+        # detect apenas pessoas, máximo 1
         res = model(
             frame,
             conf=cfg.get('conf_thresh',0.5),
-            classes=sel_cls if sel_cls else None,
+            classes=sel_cls,
             max_det=max_det
         )
-        # pick best
-        best, best_conf = None, 0
-        for box in res[0].boxes:
-            c = float(box.conf[0]); cid=int(box.cls[0])
-            if c<cfg.get('conf_thresh',0.5) or cid>=len(names): continue
-            if sel_cls and cid not in sel_cls: continue
-            if c>best_conf: best_conf, best = c, box
-
-        # overlay on frame
-        if best:
-            x1,y1,x2,y2 = map(int,best.xyxy[0])
-            bw,bh = x2-x1, y2-y1
-            cx,cy = x1+bw//2, y1+bh//2
+        # obtém a única caixa detectada (se existir)
+        if res[0].boxes:
+            box = res[0].boxes[0]
+            x1,y1,x2,y2 = map(int, box.xyxy[0])
+            best_conf = float(box.conf[0])
+            bw, bh = x2 - x1, y2 - y1
+            cx, cy = x1 + bw // 2, y1 + bh // 2
             zm = zoom_logic(bw, bh, GOAL_W, GOAL_H)
-            cv2.rectangle(frame,(x1,y1),(x2,y2),(0,255,0),2)
-            cv2.putText(frame,f"Conf:{best_conf:.2f} Zoom:{zm}",(x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255),2)
+            cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
+            cv2.putText(frame, f"Conf:{best_conf:.2f} Zoom:{zm}",
+                        (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+            relx = cx - w//2
+            rely = (h//2) - cy
+        else:
+            zm = 0
+            relx, rely = 0, 0
 
         # stream
         out.write(frame)
         # CSV overwrite every detect_int
         if count % detect_int == 0:
             ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            if best:
-                relx = cx - w//2
-                rely = (h//2) - cy
-                row = [ts, count, relx, rely, zm]
-            else:
-                row = [ts, count, 0,0,0]
-            write_single_line_csv(csv_path, header, row)
+            row = [ts, count, relx, rely, zm]
+            write_single_line_csv(cssv_path, header, row)
 
     logging.info("Stopping...")
     grabber.join(timeout=2)
