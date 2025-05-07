@@ -70,7 +70,6 @@ def zoom_logic(box_w, box_h, w, h):
 # =============================================================================
 
 def build_input_pipeline(ip, port, stream, latency):
-    # Para reduzir ainda mais CPU/GPU, podes baixar para 320x240 aqui
     return (
         f"rtspsrc location=rtsp://root:atlas@{ip}/{stream} latency={latency} ! "
         "queue ! rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! "
@@ -78,8 +77,11 @@ def build_input_pipeline(ip, port, stream, latency):
     )
 
 def build_output_pipeline(ip, port, w, h, fps, bitrate):
+    # Agora com f-strings corretos e definições de caps
     return (
-        "appsrc ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} ! "
+        f"appsrc ! video/x-raw,format=BGR,width={w},height={h},framerate={fps}/1 ! "
+        "videoconvert ! "
+        f"x264enc tune=zerolatency bitrate={bitrate} ! "
         "h264parse ! rtph264pay config-interval=1 pt=96 ! "
         f"udpsink host={ip} port={port} sync=false"
     )
@@ -91,10 +93,10 @@ class FrameGrabber(threading.Thread):
     def __init__(self, cap_factory, queue, stop_event, max_retries=None, retry_delay=1):
         super().__init__(daemon=True)
         self.cap_factory = cap_factory
-        self.capture = cap_factory()
-        self.queue = queue
-        self.stop_event = stop_event
-        self.dropped = 0
+        self.capture     = cap_factory()
+        self.queue       = queue
+        self.stop_event  = stop_event
+        self.dropped     = 0
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
@@ -146,29 +148,26 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     # Config params
-    cam_ip       = cfg['camera_ipv4']
-    gs_ip        = cfg['ground_station_ip']
-    rtsp_port    = cfg.get('rtsp_port', 8554)
-    udp_port     = cfg.get('udp_port', 5600)
-    stream       = cfg.get('stream_name', 'main.264')
-    latency      = cfg.get('latency', 100)
-    fps          = cfg.get('fps', 30)
-    bitrate      = cfg.get('bitrate', 4_000_000)
+    cam_ip     = cfg['camera_ipv4']
+    gs_ip      = cfg['ground_station_ip']
+    rtsp_port  = cfg.get('rtsp_port', 8554)
+    udp_port   = cfg.get('udp_port', 5600)
+    stream     = cfg.get('stream_name', 'main.264')
+    latency    = cfg.get('latency', 100)
+    fps        = cfg.get('fps', 30)
+    bitrate    = cfg.get('bitrate', 4_000_000)
     global TOLERANCE
-    TOLERANCE    = cfg.get('tolerance', TOLERANCE)
-    detect_int   = cfg.get('detection_interval', 20)
-    max_det      = cfg.get('max_det', None)
+    TOLERANCE  = cfg.get('tolerance', TOLERANCE)
+    detect_int = cfg.get('detection_interval', 20)
+    max_det    = cfg.get('max_det', None)
 
     # Só detectar pessoas (classe 0)
     sel_cls = [0]
 
-    # Configurações de otimização
+    # Otimizações de inferência
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    torch.backends.cudnn.benchmark = True         # Escolhe algoritmos ótimos para shapes fixos
-    model = YOLO(cfg.get('model_path', 'yolo11n.pt')) \
-                .to(device) \
-                .half()       \
-                .eval()       # FP16 + modo eval
+    torch.backends.cudnn.benchmark = True
+    model = YOLO(cfg.get('model_path', 'yolo11n.pt')).to(device).half().eval()
 
     # GStreamer setup
     inp = build_input_pipeline(cam_ip, rtsp_port, stream, latency)
@@ -182,18 +181,19 @@ def main():
     h, w = frame.shape[:2]
 
     out_pipe = build_output_pipeline(gs_ip, udp_port, w, h, fps, bitrate)
-    out = cv2.VideoWriter(out_pipe, cv2.CAP_GSTREAMER, fps, (w, h))
+    # Note que agora passamos quatro argumentos: API (CAP_GSTREAMER), fourcc, fps e tamanho
+    out = cv2.VideoWriter(out_pipe, cv2.CAP_GSTREAMER, 0, fps, (w, h), True)
     if not out.isOpened():
         raise RuntimeError('Cannot open Writer')
 
     # CSV setup
-    out_dir = cfg.get('output_dir', 'output')
+    out_dir  = cfg.get('output_dir', 'output')
     os.makedirs(out_dir, exist_ok=True)
     csv_path = os.path.join(out_dir, '1linha.csv')
     header   = ['Timestamp', 'Frame', 'CenterX', 'CenterY', 'Zoom']
 
-    # Start grabber (fila menor para evitar backlog)
-    q = queue.Queue(maxsize=5)
+    # Start grabber
+    q       = queue.Queue(maxsize=5)
     grabber = FrameGrabber(cap_factory, q, stop_event)
     grabber.start()
 
@@ -248,11 +248,11 @@ def main():
         # Stream
         out.write(frame)
 
-        # Libertar cache de GPU periodicamente para evitar OOM
+        # Liberta cache da GPU periodicamente
         if torch.cuda.is_available() and count % (detect_int * 10) == 0:
             torch.cuda.empty_cache()
 
-        # CSV overwrite a cada detect_int
+        # CSV overwrite
         if count % detect_int == 0:
             ts = datetime.now().strftime('%H:%M:%S.%f')[:-3]
             if best:
