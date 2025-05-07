@@ -235,7 +235,7 @@ def main():
                 rely = (h//2) - cy
                 row = [ts, count, relx, rely, zm]
             else:
-                row = [ts, count, 0,0,0]
+                row = [ts, 0, 0,0,0]
             write_single_line_csv(csv_path, header, row)
 
     logging.info("Stopping...")
