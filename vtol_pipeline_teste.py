@@ -57,7 +57,7 @@ def reconnect(cap_factory, max_backoff=32):
 GOAL_W, GOAL_H = 480, 240
 TOLERANCE = 0.15
 
-def zoom_logic(box_w, box_h, w, h):
+def zoom_logic(box_w, box_h, w, h): FIXME # acho que os racios tem de ser normalizados para estarem entre 0 e 1
     ratio_w = max(box_w / w, w / box_w)
     ratio_h = max(box_h / h, h / box_h)
     if ratio_w <= 1 + TOLERANCE and ratio_h <= 1 + TOLERANCE:
@@ -82,14 +82,14 @@ def build_output_pipeline(ip, port, w, h, fps, bitrate):
     return (
         f"appsrc ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} ! "
         "h264parse ! rtph264pay config-interval=1 pt=96 ! "
-        f"udpsink host={ip} port={port} sync=false"
+        f"udpsink host=127.0.0.1 port={port} sync=false"
     )
 
 # =============================================================================
 # Frame Grabber Thread
 # =============================================================================
 class FrameGrabber(threading.Thread):
-    def __init__(self, cap_factory, queue, stop_event, max_retries=None, retry_delay=1):
+    def __init__(self, cap_factory, queue, stop_event, grab_interval=0.1, max_retries=None, retry_delay=1):
         super().__init__(daemon=True)
         self.cap_factory = cap_factory
         self.capture = cap_factory()
@@ -98,6 +98,8 @@ class FrameGrabber(threading.Thread):
         self.dropped = 0
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.grab_interval = grab_interval 
+
 
     def run(self):
         retry = 0
@@ -122,6 +124,7 @@ class FrameGrabber(threading.Thread):
                 self.dropped += 1
                 if self.dropped % 100 == 0:
                     logging.warning("Dropped %d frames", self.dropped)
+            time.sleep(self.grab_interval)
 
 # =============================================================================
 # CSV Helper
@@ -158,7 +161,7 @@ def main():
     global TOLERANCE
     TOLERANCE = cfg.get('tolerance', TOLERANCE)
     detect_int = cfg.get('detection_interval', 20)
-    sel_cls = cfg.get('selected_classes', [])
+    sel_cls = cfg.get('selected_clastime.time(),ses', [])
     max_det = cfg.get('max_det', None)
 
     # YOLOv11 model
@@ -181,7 +184,7 @@ def main():
     # Single-line CSV setup
     out_dir = cfg.get('output_dir','output')
     os.makedirs(out_dir, exist_ok=True)
-    csv_path = os.path.join(out_dir, '/home/atlas/atlas/visao/24-25/Visao-Person-Detection/1linha.csv')
+    csv_path = os.path.join(out_dir, '/home/atlas/atlas/visao/24-25/Visao-Person-Detection/output/1linha.csv')
     header = ['Timestamp','Frame','CenterX','CenterY','Zoom']
 
     # Start grabber
@@ -235,7 +238,7 @@ def main():
                 rely = (h//2) - cy
                 row = [ts, count, relx, rely, zm]
             else:
-                row = [ts, count, 0,0,0]
+                row = [ts, 0, 0,0,0]
             write_single_line_csv(csv_path, header, row)
 
     logging.info("Stopping...")
