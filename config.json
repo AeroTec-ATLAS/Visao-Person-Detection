@@ -1,9 +1,9 @@
 {
     "camera_ipv4": "192.168.0.10",
-    "ground_station_ip": "192.168.204.125",
+    "ground_station_ip": "192.168.152.125",
     "rtsp_port": 8554,
-    "udp_port": 5600,
-    "stream_name": "main.264",
+    "udp_port": 5602,
+    "stream_name": "stream=0",
     "latency": 100,
     "fps": 30,
     "bitrate": 800,
